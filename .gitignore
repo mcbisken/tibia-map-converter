@@ -1,0 +1,9 @@
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+testdata/
+docs/
+tests/
+_shot.py
