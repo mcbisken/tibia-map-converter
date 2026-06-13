@@ -1,7 +1,14 @@
 # appearances.py — minimal pure-stdlib reader for Canary's appearances.dat
-# (a serialized protobuf "Appearances" message). Extracts only each object's
-# id (field 1, varint) and name (field 4, bytes); all other fields are skipped
-# by wire type. No protobuf library required.
+# (a serialized protobuf "Appearances" message). Extracts each object's
+# id (field 1, varint), function flags (field 3, AppearanceFlags submessage)
+# and name (field 4, bytes); all other fields are skipped by wire type.
+# No protobuf library required.
+
+# AppearanceFlags field numbers -> flag names. Verified against the real
+# Canary appearances.dat (e.g. all 3158 ground tiles carry field 1, backpacks
+# field 5, gold coins field 6, liquid pools field 12, buckets/vials field 19).
+_FLAG_FIELDS = {1: "ground", 5: "container", 6: "stackable", 12: "splash",
+                13: "unpassable", 18: "pickupable", 19: "fluidcontainer"}
 
 def _read_varint(buf, i):
     shift = 0
@@ -34,24 +41,42 @@ def _decode_name(b):
     except UnicodeDecodeError:
         return b.decode("latin-1")
 
+def _parse_flags(buf, start, end):
+    """Collect named flags present in an AppearanceFlags submessage."""
+    flags = set()
+    i = start
+    while i < end:
+        tag, i = _read_varint(buf, i)
+        field, wire = tag >> 3, tag & 7
+        name = _FLAG_FIELDS.get(field)
+        if name:
+            flags.add(name)
+        i = _skip_field(buf, i, wire)
+    return frozenset(flags)
+
 def _parse_appearance(buf, start, end):
     i = start
     aid = None
     name = ""
+    flags = frozenset()
     while i < end:
         tag, i = _read_varint(buf, i)
         field, wire = tag >> 3, tag & 7
         if field == 1 and wire == 0:
             aid, i = _read_varint(buf, i)
+        elif field == 3 and wire == 2:
+            ln, i = _read_varint(buf, i)
+            flags = _parse_flags(buf, i, i + ln); i += ln
         elif field == 4 and wire == 2:
             ln, i = _read_varint(buf, i)
             name = _decode_name(buf[i:i + ln]); i += ln
         else:
             i = _skip_field(buf, i, wire)
-    return aid, name
+    return aid, name, flags
 
 def read_appearances(path):
-    """Return [(appearanceId:int, name:str)] for every object appearance."""
+    """Return [(appearanceId:int, name:str, flags:frozenset[str])] for every
+    object appearance."""
     with open(path, "rb") as f:
         buf = f.read()
     out = []
@@ -61,10 +86,10 @@ def read_appearances(path):
         field, wire = tag >> 3, tag & 7
         if field == 1 and wire == 2:                 # Appearances.object
             ln, i = _read_varint(buf, i)
-            aid, name = _parse_appearance(buf, i, i + ln)
+            aid, name, flags = _parse_appearance(buf, i, i + ln)
             i += ln
             if aid is not None:
-                out.append((aid, name))
+                out.append((aid, name, flags))
         else:
             i = _skip_field(buf, i, wire)
     return out

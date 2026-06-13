@@ -1,7 +1,7 @@
 # OTBM Item Remapper
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
-![Version](https://img.shields.io/badge/release-v1.0.0-green)
+![Version](https://img.shields.io/badge/release-v1.1.0-green)
 ![Python](https://img.shields.io/badge/python-stdlib%20only-3776AB)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -35,6 +35,19 @@ client version untouched.
     shared **clientID**, the stable anchor both tables agree on.
   - **Canary `appearances.dat`** (Canary / OTServBR-Global and other modern forks
     that dropped `items.otb`) — matched by **item name**.
+- **Function-aware matching** — items aren't just sprites; they have server-side
+  *behavior* (container, door, teleport, stackable, block-solid, ...). The tool
+  reads each item's **group and flags** from `items.otb` (or its flags from
+  `appearances.dat`) and uses them to break ties between same-sprite candidates,
+  then **flags every match whose behavior still differs** for review.
+- **Container-risk detection** — if a chest that holds items on the map would be
+  remapped to a non-container ID, the server would drop or reject its contents.
+  These cases are detected and reported loudly before they bite.
+- **Script-impact scan** *(optional)* — point the tool at a server `data/` folder
+  and it lists every `.xml`/`.lua` line that references an item ID the remap
+  changed, so actions/movements/quest scripts don't silently break.
+- **Map positions in reports** — every flagged item lists sample `(x,y,z)`
+  coordinates so you can jump straight to it in your map editor.
 - **Custom-item relocation** — items that exist only on the source are moved to
   fresh free IDs in the new `items.otb`, with optional `items.xml` definitions
   generated for them.
@@ -85,7 +98,8 @@ and most 8.x–10.x distros).
 | **Map (.otbm)** | The map you want to convert. |
 | **Source items.otb (old)** | The item table the map was authored against — from the *old* server's `data/items/`. |
 | **Target items.otb (new)** | The item table to convert **to** — your *new* distro's `data/items/`. |
-| **Source items.xml (optional)** | Only needed to auto-generate definitions for genuinely custom items. Leave empty if you don't have customs. |
+| **Source items.xml (optional)** | Supplies item **names** for the report and auto-generates definitions for genuinely custom items. |
+| **Scripts folder (optional)** | The old server's `data/` folder — scanned for `.xml`/`.lua` references to remapped IDs. |
 | **Output folder** | Where results are written (defaults to a `converted/` folder next to the map). |
 
 **Outputs**
@@ -98,8 +112,11 @@ and most 8.x–10.x distros).
 - **`items.custom.xml`** — server-side definitions for relocated custom items (only
   produced if customs were found **and** a source `items.xml` was supplied).
 - **`remap-report.md`** — human-readable summary of what matched, what was
-  relocated, and what couldn't be anchored.
+  relocated, what couldn't be anchored — and which matches need review because
+  the target item's **function differs** (with map coordinates).
 - **`remap.json`** — the complete old→new ID map, for scripting or auditing.
+- **`script-impact.md`** — every script line referencing a remapped ID (only when
+  a scripts folder was supplied).
 
 ---
 
@@ -118,6 +135,7 @@ boundary, so this mode matches items **by name** instead.
 | **Source items.xml (old)** | Your *old* server's `items.xml` — this supplies the item **names** to match on. |
 | **Target appearances.dat (Canary)** | From the *new* Canary server's `data/items/`. |
 | **Same-era source: match by ID first** *(checkbox)* | Tick this only when the source map is **already** from an appearances-era server (another Canary/OTServBR fork). See below. |
+| **Scripts folder (optional)** | The old server's `data/` folder — scanned for `.xml`/`.lua` references to remapped IDs. |
 | **Output folder** | Where results are written. |
 
 **Same-era fast path.** If your source is already a Canary/12+ map, ticking
@@ -130,9 +148,11 @@ needlessly re-matched by name.
 
 - **`<MapName>.remapped.otbm`** — the converted map.
 - **`remap-report.md`** — lists every item bucketed as **exact**, **ambiguous**
-  (auto-resolved to the lowest matching ID), **id-matched** (same-era fast path), or
-  **unmatched**.
+  (auto-resolved, function-aware), **id-matched** (same-era fast path),
+  **container risk**, or **unmatched**.
 - **`remap.json`** — the complete old→new ID map.
+- **`script-impact.md`** — every script line referencing a remapped ID (only when
+  a scripts folder was supplied).
 
 > **Cross-era conversions are best-effort, not a perfect port.** Old → new
 > (8.6 / 10.x → Canary) reorganised names and sprites, so expect a meaningful
@@ -152,7 +172,9 @@ needlessly re-matched by name.
 | --- | --- |
 | **matches** | Anchored 1:1 by clientID to a target item. |
 | **customs** | Existed only on the source; relocated to a fresh free ID in the new `items.otb`. |
-| **ambiguous** | Multiple target items shared the clientID; auto-resolved to the lowest ID. |
+| **ambiguous** | Multiple target items shared the clientID; auto-resolved to the candidate whose **group and flags** best match the source item (then lowest ID). |
+| **function mismatches** | Matched by sprite, but the target item's server-side behavior differs (group or critical flags: container/door/teleport/..., stackable, moveable, pickupable, block-solid). Review these — listed with names and map coordinates. |
+| **container risks** | The item holds contents on the map, but its target ID is **not** a container — the server would drop/reject the contents. Fix before deploying. |
 | **unanchored** | No clientID match in the target; left with its original ID (review these). |
 | **changed** | How many IDs actually differ between old and new. |
 
@@ -162,7 +184,8 @@ needlessly re-matched by name.
 | --- | --- |
 | **id_matched** | (Same-era fast path) ID already existed in the target Canary; kept as-is. |
 | **exact** | Matched 1:1 by name. |
-| **ambiguous** | Several Canary items shared the name; auto-resolved to the lowest ID. |
+| **ambiguous** | Several Canary items shared the name; auto-resolved preferring the candidate whose appearance **flags** match how the item is used (e.g. a chest holding loot prefers a container-flagged target), then lowest ID. |
+| **container risks** | The item holds contents on the map, but the chosen target appearance is not container-flagged (or unknown). Fix before deploying. |
 | **unmatched** | No name match; left with its original ID (fix in a map editor). |
 | **changed** | How many IDs actually differ. |
 
@@ -181,6 +204,22 @@ counterpart in the target are relocated to fresh free IDs.
 clientIDs and sprite IDs don't survive, but **names** mostly do. The tool reads
 each source item's name from `items.xml` and matches it against the names in the
 target `appearances.dat`, with an optional ID-first fast path for same-era sources.
+
+**Function awareness.** A sprite match alone isn't enough: two items can look
+identical but behave differently server-side (a locked vs. unlocked door, a
+stackable vs. non-stackable pile, a container vs. decoration). The tool reads
+each item's **group** (ground, container, teleport, door, ...) and **flags**
+(stackable, moveable, pickupable, block-solid) from both tables. They break ties
+between same-sprite candidates, and any final match whose function still differs
+is listed under **Function mismatches** — sprite-perfect, behavior-suspect.
+
+**What a map remap can't fix.** Action IDs, unique IDs, texts, teleport
+destinations and door house-IDs stored *in the map* are preserved byte-for-byte.
+But the old server's **scripts** (`actions.xml`, `movements.xml`, Lua) still
+reference the *old* item IDs. That's what the optional **scripts folder** scan is
+for: it cross-references every remapped ID against your `data/` folder and writes
+`script-impact.md` so you know exactly which scripts to update (the full old→new
+table is in `remap.json`).
 
 The map's geometry and its `-spawn.xml` / `-house.xml` companions carry over
 **unchanged** — they store names and positions, not item IDs.
@@ -204,6 +243,9 @@ The map's geometry and its `-spawn.xml` / `-house.xml` companions carry over
   with the map so coverage can be extended.
 - Cross-era Canary conversions (see Mode 2) are best-effort by nature; budget time
   to clean up the unmatched tail in a map editor.
+- The script scan matches bare numeric literals in `.xml`/`.lua`, so a number that
+  is really an action ID or a count can appear as a false positive — it errs on
+  the side of showing too much. Use `remap.json` as the authoritative ID table.
 
 ## Building from source
 
@@ -219,6 +261,19 @@ To run straight from source instead:
 
 ```powershell
 python src\gui.py
+```
+
+## Command line
+
+For batch use there's a CLI with the same two modes:
+
+```powershell
+python src\cli.py classic --map Map.otbm --source-otb old\items.otb `
+    --target-otb new\items.otb --source-xml old\items.xml `
+    --scripts old\data --out converted
+
+python src\cli.py canary --map Map.otbm --source-xml old\items.xml `
+    --appearances new\appearances.dat --prefer-id --scripts old\data --out converted
 ```
 
 ## License

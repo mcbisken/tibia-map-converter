@@ -20,6 +20,7 @@ class App:
         self.src_xml_var = tk.StringVar()      # classic: optional; canary: source names
         self.appearances_var = tk.StringVar()
         self.prefer_id_var = tk.BooleanVar(value=False)
+        self.scripts_var = tk.StringVar()      # optional server data/ folder to scan
         self.out_var = tk.StringVar()
 
         bar = ttk.Frame(root)
@@ -64,6 +65,7 @@ class App:
                             text="Same-era source: match by ID first (keep ids that "
                                  "already exist in Canary)").grid(
                 row=r, column=1, columnspan=2, sticky="w", padx=4, pady=2); r += 1
+        self._dir_row("Scripts folder (optional):", self.scripts_var, r); r += 1
         self._dir_row("Output folder:", self.out_var, r); r += 1
 
     def _file_row(self, label, var, row, filetypes, on_set=None):
@@ -106,13 +108,15 @@ class App:
         try:
             mode = self.mode.get()
             m, out = self.map_var.get(), self.out_var.get()
+            scripts = self.scripts_var.get() or None
             if mode == "classic":
                 s, d = self.src_otb_var.get(), self.dst_otb_var.get()
                 if not (m and s and d and out):
                     self._write("ERROR: Map, both items.otb files, and output folder are required.")
                     return
                 xml = self.src_xml_var.get() or None
-                summary = convert.convert(m, s, d, out, src_xml=xml, log=self._write)
+                summary = convert.convert(m, s, d, out, src_xml=xml,
+                                          scripts_dir=scripts, log=self._write)
                 self._write("")
                 self._write(f"SUCCESS: matches={summary.matches} customs={summary.customs} "
                             f"ambiguous={summary.ambiguous} unanchored={summary.unanchored} "
@@ -127,13 +131,23 @@ class App:
                                 "and output folder are required.")
                     return
                 summary = convert.convert_to_canary(m, x, a, out, log=self._write,
-                                                    prefer_id=self.prefer_id_var.get())
+                                                    prefer_id=self.prefer_id_var.get(),
+                                                    scripts_dir=scripts)
                 self._write("")
                 self._write(f"SUCCESS: id_matched={summary.id_matched} exact={summary.exact} "
                             f"ambiguous={summary.ambiguous} unmatched={summary.unmatched} "
                             f"changed={summary.changed}")
                 self._write(f"Converted map: {summary.out_map}")
-                self._write(f"Review report: {summary.out_report}")
+            if summary.mismatches:
+                self._write(f"REVIEW: {summary.mismatches} function mismatches "
+                            "(sprite matched, behavior differs) — see remap-report.md")
+            if summary.container_risks:
+                self._write(f"REVIEW: {summary.container_risks} container risks "
+                            "(contents on a non-container target) — see remap-report.md")
+            if summary.script_hits:
+                self._write(f"REVIEW: {summary.script_hits} remapped ids referenced "
+                            "in scripts — see script-impact.md")
+            self._write(f"Review report: {summary.out_report}")
         except Exception as e:
             self._write("")
             self._write(f"FAILED: {e}")

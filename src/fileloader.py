@@ -22,24 +22,28 @@ def read_tree(data):
     root = Node(data[pos], bytearray(), [])
     pos += 1
     stack = [root]
-    while stack:
-        node = stack[-1]
-        b = data[pos]
-        if b == NODE_START:
-            pos += 1
-            child = Node(data[pos], bytearray(), [])
-            pos += 1
-            node.children.append(child)
-            stack.append(child)
-        elif b == NODE_END:
-            pos += 1
-            node.props = bytes(node.props)
-            stack.pop()
-        elif b == ESCAPE:
-            pos += 1
-            node.props.append(data[pos]); pos += 1
-        else:
-            node.props.append(b); pos += 1
+    try:
+        while stack:
+            node = stack[-1]
+            b = data[pos]
+            if b == NODE_START:
+                pos += 1
+                child = Node(data[pos], bytearray(), [])
+                pos += 1
+                node.children.append(child)
+                stack.append(child)
+            elif b == NODE_END:
+                pos += 1
+                node.props = bytes(node.props)
+                stack.pop()
+            elif b == ESCAPE:
+                pos += 1
+                node.props.append(data[pos]); pos += 1
+            else:
+                node.props.append(b); pos += 1
+    except IndexError:
+        raise ValueError("truncated or corrupt node tree "
+                         f"(unexpected end of file at byte {pos})") from None
     return identifier, root
 
 def write_tree(identifier, root):
